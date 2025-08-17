@@ -1,0 +1,291 @@
+version: '3.8'
+
+services:
+  # PostgreSQL - 用户数据
+  postgres:
+    image: postgres:15
+    container_name: noteai_postgres_dev
+    environment:
+      POSTGRES_DB: noteai_users
+      POSTGRES_USER: noteai
+      POSTGRES_PASSWORD: noteai_dev_pass
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=C --lc-ctype=C"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-postgres.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U noteai -d noteai_users"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - noteai_network
+
+  # MongoDB - 笔记和AI会话
+  mongodb:
+    image: mongo:6
+    container_name: noteai_mongodb_dev
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: noteai
+      MONGO_INITDB_ROOT_PASSWORD: noteai_dev_pass
+      MONGO_INITDB_DATABASE: noteai_notes
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+      - ./scripts/init-mongo.js:/docker-entrypoint-initdb.d/init.js
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - noteai_network
+
+  # Redis - 缓存和消息队列
+  redis:
+    image: redis:7-alpine
+    container_name: noteai_redis_dev
+    command: redis-server --requirepass noteai_dev_pass --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - noteai_network
+
+  # Elasticsearch - 搜索引擎
+  elasticsearch:
+    image: elasticsearch:8.11.0
+    container_name: noteai_elasticsearch_dev
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+      - bootstrap.memory_lock=true
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - noteai_network
+
+  # 用户服务
+  user-service:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.user_service
+    container_name: noteai_user_service_dev
+    environment:
+      - ENVIRONMENT=development
+      - DEBUG=true
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=noteai
+      - POSTGRES_PASSWORD=noteai_dev_pass
+      - POSTGRES_DB=noteai_users
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=noteai_dev_pass
+      - JWT_SECRET_KEY=dev-super-secret-jwt-key-change-in-production
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./services/user_service:/app/services/user_service
+      - ./shared:/app/shared
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - noteai_network
+    restart: unless-stopped
+
+  # AI服务
+  ai-service:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.ai_service
+    container_name: noteai_ai_service_dev
+    environment:
+      - ENVIRONMENT=development
+      - DEBUG=true
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-your-deepseek-api-key}
+      - DEEPSEEK_BASE_URL=https://api.deepseek.com
+      - DEEPSEEK_MODEL=deepseek-chat
+      - MONGODB_HOST=mongodb
+      - MONGODB_PORT=27017
+      - MONGODB_USER=noteai
+      - MONGODB_PASSWORD=noteai_dev_pass
+      - MONGODB_DB=noteai_notes
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=noteai_dev_pass
+    ports:
+      - "8002:8002"
+    volumes:
+      - ./services/ai_service:/app/services/ai_service
+      - ./shared:/app/shared
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - noteai_network
+    restart: unless-stopped
+
+  # 笔记服务
+  note-service:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.note_service
+    container_name: noteai_note_service_dev
+    environment:
+      - ENVIRONMENT=development
+      - DEBUG=true
+      - MONGODB_HOST=mongodb
+      - MONGODB_PORT=27017
+      - MONGODB_USER=noteai
+      - MONGODB_PASSWORD=noteai_dev_pass
+      - MONGODB_DB=noteai_notes
+      - ELASTICSEARCH_HOST=elasticsearch
+      - ELASTICSEARCH_PORT=9200
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=noteai_dev_pass
+    ports:
+      - "8003:8003"
+    volumes:
+      - ./services/note_service:/app/services/note_service
+      - ./shared:/app/shared
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - noteai_network
+    restart: unless-stopped
+
+  # API网关 (Nginx)
+  api-gateway:
+    image: nginx:alpine
+    container_name: noteai_api_gateway_dev
+    ports:
+      - "8000:80"
+    volumes:
+      - ./docker/nginx/nginx.dev.conf:/etc/nginx/nginx.conf
+    depends_on:
+      - user-service
+      - ai-service
+      - note-service
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - noteai_network
+    restart: unless-stopped
+
+  # 开发工具 - Adminer (数据库管理)
+  adminer:
+    image: adminer
+    container_name: noteai_adminer_dev
+    ports:
+      - "8080:8080"
+    environment:
+      ADMINER_DEFAULT_SERVER: postgres
+    depends_on:
+      - postgres
+    networks:
+      - noteai_network
+    profiles:
+      - tools
+
+  # 开发工具 - Mongo Express (MongoDB管理)
+  mongo-express:
+    image: mongo-express
+    container_name: noteai_mongo_express_dev
+    ports:
+      - "8081:8081"
+    environment:
+      ME_CONFIG_MONGODB_ADMINUSERNAME: noteai
+      ME_CONFIG_MONGODB_ADMINPASSWORD: noteai_dev_pass
+      ME_CONFIG_MONGODB_URL: mongodb://noteai:noteai_dev_pass@mongodb:27017/
+      ME_CONFIG_BASICAUTH_USERNAME: admin
+      ME_CONFIG_BASICAUTH_PASSWORD: admin123
+    depends_on:
+      - mongodb
+    networks:
+      - noteai_network
+    profiles:
+      - tools
+
+  # 开发工具 - Redis Commander (Redis管理)
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: noteai_redis_commander_dev
+    ports:
+      - "8082:8081"
+    environment:
+      REDIS_HOSTS: local:redis:6379:0:noteai_dev_pass
+    depends_on:
+      - redis
+    networks:
+      - noteai_network
+    profiles:
+      - tools
+
+volumes:
+  postgres_data:
+    driver: local
+  mongodb_data:
+    driver: local
+  redis_data:
+    driver: local
+  elasticsearch_data:
+    driver: local
+
+networks:
+  noteai_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
