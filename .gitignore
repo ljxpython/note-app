@@ -300,8 +300,6 @@ logs/
 uploads/
 
 # Development and build tools
-.bmad-core/
-.claude/
 .trae/
 .idea/
 

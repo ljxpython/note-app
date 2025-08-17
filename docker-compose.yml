@@ -1,0 +1,70 @@
+version: '3.8'
+
+services:
+  # 后端API服务
+  noteai-backend:
+    build: .
+    container_name: noteai-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_PATH=/app/data/noteai.db
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-your-secret-key-change-in-production}
+      - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
+      - REFRESH_TOKEN_EXPIRE_DAYS=${REFRESH_TOKEN_EXPIRE_DAYS:-7}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+      - DATABASE_DEBUG=${DATABASE_DEBUG:-false}
+    volumes:
+      - noteai_data:/app/data
+      - ./logs:/app/logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - noteai-network
+
+  # 前端服务
+  noteai-frontend:
+    build:
+      context: ./noteai-frontend
+      dockerfile: Dockerfile
+    container_name: noteai-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - REACT_APP_API_URL=http://localhost:8000
+      - REACT_APP_ENV=production
+    depends_on:
+      - noteai-backend
+    restart: unless-stopped
+    networks:
+      - noteai-network
+
+  # Nginx反向代理 (可选)
+  nginx:
+    image: nginx:alpine
+    container_name: noteai-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - noteai-backend
+      - noteai-frontend
+    restart: unless-stopped
+    networks:
+      - noteai-network
+
+volumes:
+  noteai_data:
+    driver: local
+
+networks:
+  noteai-network:
+    driver: bridge

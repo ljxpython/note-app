@@ -1,0 +1,46 @@
+{
+  "timestamp": "2025-08-17T23:25:07.906360",
+  "summary": {
+    "total_tests": 6,
+    "passed_tests": 6,
+    "success_rate": 100.0
+  },
+  "results": [
+    {
+      "test": "后端服务启动",
+      "success": true,
+      "details": "服务正常响应",
+      "timestamp": "2025-08-17T23:25:06.486991"
+    },
+    {
+      "test": "健康检查",
+      "success": true,
+      "details": "版本: 4.0.0",
+      "timestamp": "2025-08-17T23:25:06.494039"
+    },
+    {
+      "test": "账号登录 (admin@noteai.com)",
+      "success": true,
+      "details": "角色: admin, 令牌长度: 291",
+      "timestamp": "2025-08-17T23:25:06.826665"
+    },
+    {
+      "test": "账号登录 (test@example.com)",
+      "success": true,
+      "details": "角色: user, 令牌长度: 293",
+      "timestamp": "2025-08-17T23:25:07.388172"
+    },
+    {
+      "test": "受保护API",
+      "success": true,
+      "details": "JWT认证正常",
+      "timestamp": "2025-08-17T23:25:07.393018"
+    },
+    {
+      "test": "AI功能",
+      "success": true,
+      "details": "文本优化正常",
+      "timestamp": "2025-08-17T23:25:07.905586"
+    }
+  ]
+}
